@@ -19,7 +19,7 @@ from loguru import logger
 ############################### CONSTANTS
 BANDIT_REWARDS = [1, 2, 3, 4]
 NUM_TRIALS = 20000
-PRECISION = 1  # Known precision for Thompson Sampling (tau)
+PRECISION = 1
 
 
 ############################### BASE CLASS
@@ -87,7 +87,7 @@ class Visualization:
     Visualization utilities for bandit experiment results.
     """
 
-    def plot1(self, eg_rewards, ts_rewards, eg_best, ts_best):
+    def plot1(self, eg_rewards, ts_rewards, optimal):
         """
         Visualize the learning process for each algorithm on linear and log scale.
 
@@ -100,38 +100,40 @@ class Visualization:
         fig.suptitle("Learning Process per Algorithm", fontsize=16)
 
         trials = np.arange(1, len(eg_rewards) + 1)
+        eg_running_avg = np.cumsum(eg_rewards) / trials
+        ts_running_avg = np.cumsum(ts_rewards) / trials
 
         # E-Greedy linear
-        axes[0, 0].plot(trials, eg_rewards, label="E-Greedy Cumulative Reward", color="blue")
-        axes[0, 0].plot(trials, eg_best, label="Optimal", color="green", linestyle="--")
+        axes[0, 0].plot(trials, eg_running_avg, label="E-Greedy Avg Reward", color="blue")
+        axes[0, 0].axhline(y=optimal, label="Optimal", color="green", linestyle="--")
         axes[0, 0].set_title("Epsilon-Greedy (Linear Scale)")
         axes[0, 0].set_xlabel("Trial")
-        axes[0, 0].set_ylabel("Cumulative Reward")
+        axes[0, 0].set_ylabel("Average Reward")
         axes[0, 0].legend()
 
         # E-Greedy log
-        axes[0, 1].plot(trials, eg_rewards, label="E-Greedy Cumulative Reward", color="blue")
-        axes[0, 1].plot(trials, eg_best, label="Optimal", color="green", linestyle="--")
+        axes[0, 1].plot(trials, eg_running_avg, label="E-Greedy Avg Reward", color="blue")
+        axes[0, 1].axhline(y=optimal, label="Optimal", color="green", linestyle="--")
         axes[0, 1].set_title("Epsilon-Greedy (Log Scale)")
         axes[0, 1].set_xlabel("Trial")
-        axes[0, 1].set_ylabel("Cumulative Reward")
+        axes[0, 1].set_ylabel("Average Reward")
         axes[0, 1].set_xscale("log")
         axes[0, 1].legend()
 
         # Thompson linear
-        axes[1, 0].plot(trials, ts_rewards, label="Thompson Cumulative Reward", color="orange")
-        axes[1, 0].plot(trials, ts_best, label="Optimal", color="green", linestyle="--")
+        axes[1, 0].plot(trials, ts_running_avg, label="Thompson Avg Reward", color="orange")
+        axes[1, 0].axhline(y=optimal, label="Optimal", color="green", linestyle="--")
         axes[1, 0].set_title("Thompson Sampling (Linear Scale)")
         axes[1, 0].set_xlabel("Trial")
-        axes[1, 0].set_ylabel("Cumulative Reward")
+        axes[1, 0].set_ylabel("Average Reward")
         axes[1, 0].legend()
 
         # Thompson log
-        axes[1, 1].plot(trials, ts_rewards, label="Thompson Cumulative Reward", color="orange")
-        axes[1, 1].plot(trials, ts_best, label="Optimal", color="green", linestyle="--")
+        axes[1, 1].plot(trials, ts_running_avg, label="Thompson Avg Reward", color="orange")
+        axes[1, 1].axhline(y=optimal, label="Optimal", color="green", linestyle="--")
         axes[1, 1].set_title("Thompson Sampling (Log Scale)")
         axes[1, 1].set_xlabel("Trial")
-        axes[1, 1].set_ylabel("Cumulative Reward")
+        axes[1, 1].set_ylabel("Average Reward")
         axes[1, 1].set_xscale("log")
         axes[1, 1].legend()
 
@@ -269,7 +271,10 @@ class EpsilonGreedy(Bandit):
         """
         best_reward = max(b.p for b in bandits)
         cumulative_reward = sum(rewards)
-        cumulative_regret = best_reward * len(rewards) - cumulative_reward
+
+        # Regret = gap between best arm's TRUE mean and chosen arm's TRUE mean
+        cumulative_regret = sum(
+            best_reward - bandits[chosen].p for chosen in chosen_bandits)
 
         # Save to CSV
         df = pd.DataFrame({
@@ -313,7 +318,7 @@ class ThompsonSampling(Bandit):
         """
         self.p = p                   # true reward
         self.precision = precision   # known tau (precision of likelihood)
-        self.m = 0                   # posterior mean
+        self.m = np.mean(BANDIT_REWARDS)                   # posterior mean
         self.lambda_ = 1             # posterior precision (starts at prior precision)
         self.N = 0                   # number of pulls
         self.sum_x = 0               # sum of observed rewards
@@ -397,7 +402,10 @@ class ThompsonSampling(Bandit):
         """
         best_reward = max(b.p for b in bandits)
         cumulative_reward = sum(rewards)
-        cumulative_regret = best_reward * len(rewards) - cumulative_reward
+
+        # Regret = gap between best arm's TRUE mean and chosen arm's TRUE mean
+        cumulative_regret = sum(
+            best_reward - bandits[chosen].p for chosen in chosen_bandits)
 
         # Save to CSV
         df = pd.DataFrame({
@@ -422,23 +430,23 @@ def comparison():
     Run both algorithms, generate all plots, and compare performance visually.
     Stores results to CSV and logs cumulative reward and regret for both.
     """
+    best_reward = max(BANDIT_REWARDS)
     logger.info("Starting Epsilon-Greedy experiment...")
     eg_bandits = [EpsilonGreedy(p) for p in BANDIT_REWARDS]
-    eg_instance = EpsilonGreedy(BANDIT_REWARDS[0])
-    eg_rewards, eg_chosen = eg_instance.experiment(eg_bandits, NUM_TRIALS)
+    eg_rewards, eg_chosen = eg_bandits[0].experiment(eg_bandits, NUM_TRIALS)
+    eg_total_reward, eg_total_regret = eg_bandits[0].report(eg_rewards, eg_chosen, eg_bandits)
     eg_cum_rewards = np.cumsum(eg_rewards)
-    eg_best = np.cumsum([max(BANDIT_REWARDS)] * NUM_TRIALS)
-    eg_cum_regrets = eg_best - eg_cum_rewards
-    eg_total_reward, eg_total_regret = eg_instance.report(eg_rewards, eg_chosen, eg_bandits)
+    eg_cum_regrets = np.cumsum([best_reward - BANDIT_REWARDS[c] for c in eg_chosen])
 
     logger.info("Starting Thompson Sampling experiment...")
     ts_bandits = [ThompsonSampling(p) for p in BANDIT_REWARDS]
-    ts_instance = ThompsonSampling(BANDIT_REWARDS[0])
-    ts_rewards, ts_chosen = ts_instance.experiment(ts_bandits, NUM_TRIALS)
+    ts_rewards, ts_chosen = ts_bandits[0].experiment(ts_bandits, NUM_TRIALS)
+    ts_total_reward, ts_total_regret = ts_bandits[0].report(ts_rewards, ts_chosen, ts_bandits)
     ts_cum_rewards = np.cumsum(ts_rewards)
-    ts_best = np.cumsum([max(BANDIT_REWARDS)] * NUM_TRIALS)
-    ts_cum_regrets = ts_best - ts_cum_rewards
-    ts_total_reward, ts_total_regret = ts_instance.report(ts_rewards, ts_chosen, ts_bandits)
+    ts_cum_regrets = np.cumsum([best_reward - BANDIT_REWARDS[c] for c in ts_chosen])
+
+    eg_true_rewards = [BANDIT_REWARDS[c] for c in eg_chosen]  # true mean of chosen arm, no noise
+    ts_true_rewards = [BANDIT_REWARDS[c] for c in ts_chosen]
 
     # Merge both CSVs into a single combined CSV
     eg_df = pd.read_csv("EpsilonGreedy_results.csv")
@@ -449,7 +457,7 @@ def comparison():
 
     # Visualizations
     viz = Visualization()
-    viz.plot1(eg_cum_rewards, ts_cum_rewards, eg_best, ts_best)
+    viz.plot1(eg_true_rewards, ts_true_rewards, max(BANDIT_REWARDS))
     viz.plot2(eg_cum_rewards, ts_cum_rewards, eg_cum_regrets, ts_cum_regrets)
 
     logger.info(
