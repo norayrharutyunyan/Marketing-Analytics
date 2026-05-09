@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+*.egg-info/
+.env
+.DS_Store
+make_notebook.py
